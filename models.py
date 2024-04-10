@@ -10,7 +10,7 @@ class BaseModel(peewee.Model):
 
 
 class Author(BaseModel):
-    author_id = peewee.IntegerField()
+    author_id = peewee.PrimaryKeyField()
     name = peewee.CharField(max_length=250)
     description = peewee.TextField()
     link = peewee.CharField(max_length=250)
@@ -29,21 +29,21 @@ class BaseCategoryTag(BaseModel):
 
 
 class Category(BaseCategoryTag):
-    category_id = peewee.IntegerField()
+    category_id = peewee.PrimaryKeyField()
 
     def __str__(self):
         return self.name
 
 
 class Tag(BaseCategoryTag):
-    tag_id = peewee.IntegerField()
+    tag_id = peewee.PrimaryKeyField()
 
     def __str__(self):
         return self.name
 
 
 class Post(BaseModel):
-    post_id = peewee.IntegerField()
+    post_id = peewee.PrimaryKeyField()
     created_date = peewee.DateTimeField()
     modified_date = peewee.DateTimeField()
     slug = peewee.CharField(max_length=250)
@@ -56,23 +56,23 @@ class Post(BaseModel):
     author = peewee.ForeignKeyField(Author, backref='posts')
     featured_media_link = peewee.CharField(max_length=250)
     post_format = peewee.CharField(max_length=50)
-    primary_category_id = peewee.ForeignKeyField(Category, backref='posts')
+    primary_category = peewee.ForeignKeyField(Category, backref='posts')
 
     def __str__(self):
         return self.title
 
 
 class PostCategory(BaseModel):
-    post = peewee.ForeignKeyField(Post, backref='categories', on_delete='CASCADE')
-    category = peewee.ForeignKeyField(Category, backref='posts', on_delete='CASCADE')
+    post = peewee.ForeignKeyField(Post, backref='post_categories', on_delete='CASCADE')
+    category = peewee.ForeignKeyField(Category, backref='post_categories', on_delete='CASCADE')
 
     def __str__(self):
         return f'{self.post.title}({self.category.name})'
 
 
 class PostTag(BaseModel):
-    post = peewee.ForeignKeyField(Post, backref='tags', on_delete='CASCADE')
-    tag = peewee.ForeignKeyField(Tag, backref='posts', on_delete='CASCADE')
+    post = peewee.ForeignKeyField(Post, backref='post_tags', on_delete='CASCADE')
+    tag = peewee.ForeignKeyField(Tag, backref='post_tags', on_delete='CASCADE')
 
     def __str__(self):
         return f'{self.post.title}({self.tag.name})'
@@ -92,6 +92,10 @@ class SearchByKeyword(BaseModel):
 
     def __str__(self):
         return self.keyword.title
+
+    @classmethod
+    def default_created_at(cls):
+        return datetime.now
 
 
 class PostSearchByKeywordItem(BaseModel):
