@@ -1,7 +1,7 @@
 import time
 import requests
 from bs4 import BeautifulSoup
-from peewee import DoesNotExist, OperationalError
+from peewee import DoesNotExist, OperationalError, IntegrityError
 
 import models
 
@@ -17,12 +17,23 @@ class ScraperHandler:
         self.tagurl = tagurl
         self.allpostsurl = allpostsurl
 
-    def request_to_target_url(self, url):
-        # print(url)
-        response = requests.get(url)
-        # print(response.url)
-        # print(response.status_code)
-        return response
+    def request_to_target_url(self, url, retries=3, backoff_factor=0.5):
+        for attempt in range(retries):
+            try:
+                response = requests.get(url)
+                print(response.url)
+                print(response.status_code)
+                response.raise_for_status()  # Raise HTTPError for bad status codes
+                return response
+            except (requests.RequestException, IOError) as e:
+                if attempt < retries - 1:
+                    # Exponential backoff before retrying
+                    sleep_duration = backoff_factor * (2 ** attempt)
+                    time.sleep(sleep_duration)
+                    continue
+                else:
+                    # Raise the last encountered exception
+                    raise e
 
     def clean_view(self, text):
         soup = BeautifulSoup(text, 'html.parser')
@@ -75,9 +86,9 @@ class ScraperHandler:
                     )
                 )
 
-        with self.database_manager.database.atomic():  # Transaction begins here
+        with self.database_manager.db.atomic():  # Transaction begins here
             try:
-                for search_item in search_items:
+                for idx, search_item in enumerate(search_items):
                     post, author, categories, tags = self.parse_post_detail(slug=search_item.slug)
                     data = {
                         'post_id': post.post_id,
@@ -99,13 +110,13 @@ class ScraperHandler:
                         'tags': tags,
                     }
 
-                    print(data)
+                    print(idx, data)
 
             except Exception as e:
-                self.database_manager.rollback()  # Rollback transaction if an exception occurs
+                self.database_manager.db.rollback()  # Rollback transaction if an exception occurs
                 print(f"Error occurred: {str(e)}")
             else:
-                self.database_manager.commit()  # Commit transaction if no exceptions occur
+                self.database_manager.db.commit()  # Commit transaction if no exceptions occur
 
         return search_items
 
@@ -165,58 +176,49 @@ class ScraperHandler:
             return []
 
     def parse_all_posts(self, json_response):
-        all_posts_in_page = list()
-        authors = list
-        all_categories = list()
-        all_tags = list()
-        for i in range(len(json_response)):
-            post_id = int(json_response[i]['id'])
-            created_date = json_response[i]['date']
-            modified_date = json_response[i]['modified']
-            slug = json_response[i]['slug']
-            status = self.clean_view(json_response[i]['status'])
-            post_type = self.clean_view(json_response[i]['type'])
-            link = json_response[i]['link']
-            title = self.clean_view(json_response[i]['title']['rendered'])
-            content = self.clean_view(json_response[i]['content']['rendered'])
-            excerpt = self.clean_view(json_response[i]['excerpt']['rendered'])
-            author_id = int(json_response[i]['author'])
-            featured_media_link = json_response[i]['jetpack_featured_media_url']
-            post_format = json_response[i]['format']
-            primary_category_id = int(json_response[i]['primary_category']['term_id'])
+        all_posts_in_page = []
+        authors = []
+        all_categories = []
+        all_tags = []
 
-            self.parse_author(author_id)
+        for post_data in json_response:
+            post_id = int(post_data['id'])
 
-            category_ids = json_response[i]['categories']
-            categories = self.parse_categories(category_ids=category_ids)
+            # Check if post already exists in the database
+            try:
+                post = models.Post.get(models.Post.post_id == post_id)
+            except DoesNotExist:
+                # Post doesn't exist, create a new one
+                post = models.Post()
 
-            tag_ids = json_response[i]['tags']
-            tags = self.parse_tags(tag_ids=tag_ids)
+            # Update or create post attributes
+            post.created_date = post_data['date']
+            post.modified_date = post_data['modified']
+            post.slug = post_data['slug']
+            post.status = self.clean_view(post_data['status'])
+            post.post_type = self.clean_view(post_data['type'])
+            post.link = post_data['link']
+            post.title = self.clean_view(post_data['title']['rendered'])
+            post.content = self.clean_view(post_data['content']['rendered'])
+            post.excerpt = self.clean_view(post_data['excerpt']['rendered'])
+            post.author_id = int(post_data['author'])
+            post.featured_media_link = post_data['jetpack_featured_media_url']
+            post.post_format = post_data['format']
+            post.primary_category_id = int(post_data['primary_category']['term_id'])
 
-            post, _ = models.Post.get_or_create(
-                post_id=post_id,
-                created_date=created_date,
-                modified_date=modified_date,
-                slug=slug,
-                status=status,
-                post_type=post_type,
-                link=link,
-                title=title,
-                content=content,
-                excerpt=excerpt,
-                author_id=author_id,
-                featured_media_link=featured_media_link,
-                post_format=post_format,
-                primary_category_id=primary_category_id,
-            )
+            # Save or update the post
+            post.save()
 
-            for category in categories:
-                postcategory, _ = models.PostCategory.get_or_create(post=post.post_id, category=category.category_id)
+            # Parse author, categories, and tags
+            author = self.parse_author(post.author_id)
+            categories = self.parse_categories(category_ids=post_data['categories'])
+            tags = self.parse_tags(tag_ids=post_data['tags'])
 
-            for tag in tags:
-                posttag, _ = models.PostTag.get_or_create(post=post.post_id, tag=tag.tag_id)
-
+            # Append to lists
             all_posts_in_page.append(post)
+            authors.append(author)
+            all_categories.extend(categories)
+            all_tags.extend(tags)
 
         return all_posts_in_page, authors, all_categories, all_tags
 
@@ -224,50 +226,43 @@ class ScraperHandler:
         post_response = self.request_to_target_url(self.posturl.format(slug=slug))
         json_response = post_response.json()
         post_id = int(json_response[0]['id'])
-        created_date = json_response[0]['date']
-        modified_date = json_response[0]['modified']
-        slug = json_response[0]['slug']
-        status = self.clean_view(json_response[0]['status'])
-        post_type = self.clean_view(json_response[0]['type'])
-        link = json_response[0]['link']
-        title = self.clean_view(json_response[0]['title']['rendered'])
-        content = self.clean_view(json_response[0]['content']['rendered'])
-        excerpt = self.clean_view(json_response[0]['excerpt']['rendered'])
-        author_id = int(json_response[0]['author'])
-        featured_media_link = json_response[0]['jetpack_featured_media_url']
-        post_format = json_response[0]['format']
-        primary_category_id = int(json_response[0]['primary_category']['term_id'])
 
-        author = self.parse_author(author_id)
+        # Check if post already exists in the database
+        try:
+            post = models.Post.get(models.Post.post_id == post_id)
+        except DoesNotExist:
+            # Post doesn't exist, create a new one
+            post = models.Post()
 
-        category_ids = json_response[0]['categories']
-        categories = self.parse_categories(category_ids=category_ids)
+        # Update or create post attributes
+        post.created_date = json_response[0]['date']
+        post.modified_date = json_response[0]['modified']
+        post.slug = json_response[0]['slug']
+        post.status = self.clean_view(json_response[0]['status'])
+        post.post_type = self.clean_view(json_response[0]['type'])
+        post.link = json_response[0]['link']
+        post.title = self.clean_view(json_response[0]['title']['rendered'])
+        post.content = self.clean_view(json_response[0]['content']['rendered'])
+        post.excerpt = self.clean_view(json_response[0]['excerpt']['rendered'])
+        post.author_id = int(json_response[0]['author'])
+        post.featured_media_link = json_response[0]['jetpack_featured_media_url']
+        post.post_format = json_response[0]['format']
+        post.primary_category_id = int(json_response[0]['primary_category']['term_id'])
 
-        tag_ids = json_response[0]['tags']
-        tags = self.parse_tags(tag_ids=tag_ids)
+        # Save or update the post
+        post.save()
 
-        post, _ = models.Post.get_or_create(
-            post_id=post_id,
-            created_date=created_date,
-            modified_date=modified_date,
-            slug=slug,
-            status=status,
-            post_type=post_type,
-            link=link,
-            title=title,
-            content=content,
-            excerpt=excerpt,
-            author_id=author_id,
-            featured_media_link=featured_media_link,
-            post_format=post_format,
-            primary_category_id=primary_category_id,
-        )
+        # Parse author, categories, and tags
+        author = self.parse_author(post.author_id)
+        categories = self.parse_categories(category_ids=json_response[0]['categories'])
+        tags = self.parse_tags(tag_ids=json_response[0]['tags'])
 
+        # Create or update post categories and tags
         for category in categories:
-            models.PostCategory.get_or_create(post=post.post_id, category=category)
+            models.PostCategory.get_or_create(post=post, category=category)
 
         for tag in tags:
-            models.PostTag.get_or_create(post=post.post_id, tag=tag)
+            models.PostTag.get_or_create(post=post, tag=tag)
 
         return post, author, categories, tags
 
@@ -306,30 +301,42 @@ class ScraperHandler:
             try:
                 category = models.Category.get(models.Category.category_id == category_id)
                 categories.append(category)
-            except models.Category.DoesNotExist:
+            except DoesNotExist:
                 count, name, description, link, slug = self.parse_data(self.categoryurl, category_id)
-                category = models.Category.create(
-                    category_id=int(category_id),
-                    count=count,
-                    name=name,
-                    description=description,
-                    link=link,
-                    slug=slug,
-                )
-                categories.append(category)
+                try:
+                    category = models.Category.create(
+                        category_id=int(category_id),
+                        count=count,
+                        name=name,
+                        description=description,
+                        link=link,
+                        slug=slug,
+                    )
+                    categories.append(category)
+                except IntegrityError:
+                    # Handle the case where the tag already exists
+                    pass
         return categories
 
     def parse_tags(self, tag_ids):
         tags = list()
         for tag_id in tag_ids:
-            count, name, description, link, slug = self.parse_data(self.tagurl, tag_id)
-            tag, _ = models.Tag.get_or_create(
-                tag_id=int(tag_id),
-                count=count,
-                name=name,
-                description=description,
-                link=link,
-                slug=slug,
-            )
-            tags.append(tag)
+            try:
+                tag = models.Tag.get(models.Tag.tag_id == tag_id)
+                tags.append(tag)
+            except DoesNotExist:
+                count, name, description, link, slug = self.parse_data(self.tagurl, tag_id)
+                try:
+                    tag = models.Tag.create(
+                        tag_id=int(tag_id),
+                        count=count,
+                        name=name,
+                        description=description,
+                        link=link,
+                        slug=slug,
+                    )
+                    tags.append(tag)
+                except IntegrityError:
+                    # Handle the case where the tag already exists
+                    pass
         return tags
