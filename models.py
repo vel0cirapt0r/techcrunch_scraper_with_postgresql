@@ -1,7 +1,7 @@
-from datetime import datetime
+import peewee
+
 import constants
 import main
-import peewee
 
 
 class BaseModel(peewee.Model):
@@ -56,7 +56,6 @@ class Post(BaseModel):
     author = peewee.ForeignKeyField(Author, backref='posts')
     featured_media_link = peewee.CharField(max_length=250)
     post_format = peewee.CharField(max_length=50)
-    primary_category = peewee.ForeignKeyField(Category, backref='posts')
 
     def __str__(self):
         return self.title
@@ -88,14 +87,9 @@ class Keyword(BaseModel):
 class SearchByKeyword(BaseModel):
     keyword = peewee.ForeignKeyField(Keyword, backref='searches')
     page_count = peewee.IntegerField(default=constants.SEARCH_PAGE_COUNT)
-    created_at = peewee.DateTimeField(default=datetime.now)
 
     def __str__(self):
         return self.keyword.title
-
-    @classmethod
-    def default_created_at(cls):
-        return datetime.now
 
 
 class PostSearchByKeywordItem(BaseModel):
@@ -104,6 +98,7 @@ class PostSearchByKeywordItem(BaseModel):
     url = peewee.CharField(max_length=250)
     slug = peewee.CharField(max_length=250)
     post = peewee.ForeignKeyField(Post, backref='search_items', null=True, on_delete='CASCADE')
+    created_at = peewee.DateTimeField()
 
     def __str__(self):
         return f'{self.title}({self.search_by_keyword.keyword.title})'

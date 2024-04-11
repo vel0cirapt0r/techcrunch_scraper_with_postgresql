@@ -1,4 +1,5 @@
 import time
+import datetime
 import requests
 from bs4 import BeautifulSoup
 from peewee import DoesNotExist, OperationalError, IntegrityError
@@ -111,13 +112,12 @@ class ScraperHandler:
                         'author_id': post.author_id,
                         'featured_media_link': post.featured_media_link,
                         'post_format': post.post_format,
-                        'primary_category_id': post.primary_category_id,
                         'author': author,
                         'categories': categories,
                         'tags': tags,
                     }
 
-                    print(idx+1, data)
+                    print(idx + 1, data)
 
             except Exception as e:
                 self.database_manager.db.rollback()  # Rollback transaction if an exception occurs
@@ -146,15 +146,24 @@ class ScraperHandler:
 
     def parse_search_item(self, search_by_keyword, search_result_item):
         # Method to parse individual search item
-        item_url = search_result_item.find('a')['href']
-        item_slug = item_url.split('/')[-2]
+        item_url = search_result_item.find('a')['href']  # Extract the URL of the search result item
+        item_slug = item_url.split('/')[-2]  # Extract the slug from the URL
+        post_id = self.parse_post_detail(slug=item_slug)[0].post_id  # Get the post ID from the parsed post detail
+        # print(post_id)
 
-        search_item, _ = models.PostSearchByKeywordItem.get_or_create(
-            search_by_keyword=search_by_keyword,
-            title=search_result_item.text,
-            url=item_url,
-            slug=item_slug
-        )
+        try:
+            # Create a new search item
+            search_item = models.PostSearchByKeywordItem.create(
+                search_by_keyword=search_by_keyword,
+                title=search_result_item.text,
+                url=item_url,
+                slug=item_slug,
+                post=post_id,
+                created_at=datetime.datetime.now()
+            )
+        except IntegrityError as e:
+            # Handle the case where the item already exists
+            print("IntegrityError:", e)
 
         return search_item
 
@@ -165,7 +174,7 @@ class ScraperHandler:
                 all_posts = []
                 page = 1
                 while True:
-                # for page in range(1, 5):
+                    # for page in range(1, 5):
                     response = self.request_to_target_url(self.allpostsurl.format(page=page))
                     json_response = response.json()
 
@@ -176,6 +185,7 @@ class ScraperHandler:
                     all_posts.extend(all_posts_in_page)
                     page += 1
                     time.sleep(10)
+                    print('page:', page - 1)
                 return all_posts
         except OperationalError:
             print("Error occurred while fetching all pages.")
@@ -191,55 +201,50 @@ class ScraperHandler:
         for post_data in json_response:
             post_id = int(post_data['id'])
 
+            # Parse author, categories, and tags
+            author = self.parse_author(int(post_data['author']))
+            categories = self.parse_categories(category_ids=post_data['categories'])
+            tags = self.parse_tags(tag_ids=post_data['tags'])
+
             # Check if post already exists in the database
             try:
                 post = models.Post.get(models.Post.post_id == post_id)
             except DoesNotExist:
-                # Post doesn't exist, create a new one
-                post = models.Post()
-
-            # Update or create post attributes
-            post.created_date = post_data['date']
-            post.modified_date = post_data['modified']
-            post.slug = post_data['slug']
-            post.status = self.clean_view(post_data['status'])
-            post.post_type = self.clean_view(post_data['type'])
-            post.link = post_data['link']
-            post.title = self.clean_view(post_data['title']['rendered'])
-            post.content = self.clean_view(post_data['content']['rendered'])
-            post.excerpt = self.clean_view(post_data['excerpt']['rendered'])
-            post.author_id = int(post_data['author'])
-            post.featured_media_link = post_data['jetpack_featured_media_url']
-            post.post_format = post_data['format']
-            post.primary_category_id = int(post_data['primary_category']['term_id'])
-
-            # Save or update the post
-            try:
-                post.save()
-            except IntegrityError:
-                # Handle integrity error silently
-                pass
-
-            # Parse author, categories, and tags
-            author = self.parse_author(post.author_id)
-            categories = self.parse_categories(category_ids=post_data['categories'])
-            tags = self.parse_tags(tag_ids=post_data['tags'])
+                try:
+                    # Post doesn't exist, create a new one
+                    post = models.Post.create(post_id=post_id,
+                                              created_date=post_data['date'],
+                                              modified_date=post_data['modified'],
+                                              slug=post_data['slug'],
+                                              status=self.clean_view(post_data['status']),
+                                              post_type=self.clean_view(post_data['type']),
+                                              link=post_data['link'],
+                                              title=self.clean_view(post_data['title']['rendered']),
+                                              content=self.clean_view(post_data['content']['rendered']),
+                                              excerpt=self.clean_view(post_data['excerpt']['rendered']),
+                                              author_id=int(post_data['author']),
+                                              featured_media_link=post_data['jetpack_featured_media_url'],
+                                              post_format=post_data['format'],
+                                              )
+                except IntegrityError as e:
+                    # Handle the case where the item already exists
+                    print("IntegrityError:", e)
 
             for category in categories:
                 try:
                     models.PostCategory.get_or_create(post=post, category=category)
-                except IntegrityError:
-                    # Handle the case where the association already exists
-                    pass
+                except IntegrityError as e:
+                    # Handle the case where the item already exists
+                    print("IntegrityError:", e)
 
             # After parsing categories and tags for each post
             # Create associations with the post
             for tag in tags:
                 try:
                     models.PostTag.get_or_create(post=post, tag=tag)
-                except IntegrityError:
-                    # Handle the case where the association already exists
-                    pass
+                except IntegrityError as e:
+                    # Handle the case where the item already exists
+                    print("IntegrityError:", e)
 
             # Append to lists
             all_posts_in_page.append(post)
@@ -254,53 +259,52 @@ class ScraperHandler:
         post_response = self.request_to_target_url(self.posturl.format(slug=slug))
         json_response = post_response.json()
 
-        # Check if post already exists in the database
-        try:
-            post_id = int(json_response[0]['id'])
-            post = models.Post.get(models.Post.post_id == post_id)
-        except DoesNotExist:
-            # Post doesn't exist, create a new one
-            post = models.Post()
-
-        # Update or create post attributes
-        post.post_id = int(json_response[0]['id'])
-        post.created_date = json_response[0]['date']
-        post.modified_date = json_response[0]['modified']
-        post.slug = json_response[0]['slug']
-        post.status = self.clean_view(json_response[0]['status'])
-        post.post_type = self.clean_view(json_response[0]['type'])
-        post.link = json_response[0]['link']
-        post.title = self.clean_view(json_response[0]['title']['rendered'])
-        post.content = self.clean_view(json_response[0]['content']['rendered'])
-        post.excerpt = self.clean_view(json_response[0]['excerpt']['rendered'])
-        post.author_id = int(json_response[0]['author'])
-        post.featured_media_link = json_response[0]['jetpack_featured_media_url']
-        post.post_format = json_response[0]['format']
-        post.primary_category_id = int(json_response[0]['primary_category']['term_id'])
-
-        # Save or update the post
-        post.save()
+        post_id = int(json_response[0]['id'])
 
         # Parse author, categories, and tags
-        author = self.parse_author(post.author_id)
+        author = self.parse_author(int(json_response[0]['author']))
         categories = self.parse_categories(category_ids=json_response[0]['categories'])
         tags = self.parse_tags(tag_ids=json_response[0]['tags'])
 
-        # After parsing categories and tags for each post
-        # Create associations with the post
+        # Check if post already exists in the database
+        try:
+            post = models.Post.get(models.Post.post_id == post_id)
+        except DoesNotExist:
+            try:
+                # Post doesn't exist, create a new one
+                post = models.Post.create(post_id=post_id,
+                                          created_date=json_response[0]['date'],
+                                          modified_date=json_response[0]['modified'],
+                                          slug=json_response[0]['slug'],
+                                          status=self.clean_view(json_response[0]['status']),
+                                          post_type=self.clean_view(json_response[0]['type']),
+                                          link=json_response[0]['link'],
+                                          title=self.clean_view(json_response[0]['title']['rendered']),
+                                          content=self.clean_view(json_response[0]['content']['rendered']),
+                                          excerpt=self.clean_view(json_response[0]['excerpt']['rendered']),
+                                          author_id=int(json_response[0]['author']),
+                                          featured_media_link=json_response[0]['jetpack_featured_media_url'],
+                                          post_format=json_response[0]['format'],
+                                          )
+            except IntegrityError as e:
+                # Handle the case where the item already exists
+                print("IntegrityError:", e)
+
         for category in categories:
             try:
                 models.PostCategory.get_or_create(post=post, category=category)
-            except IntegrityError:
-                # Handle the case where the association already exists
-                pass
+            except IntegrityError as e:
+                # Handle the case where the item already exists
+                print("IntegrityError:", e)
 
+        # After parsing categories and tags for each post
+        # Create associations with the post
         for tag in tags:
             try:
                 models.PostTag.get_or_create(post=post, tag=tag)
-            except IntegrityError:
-                # Handle the case where the association already exists
-                pass
+            except IntegrityError as e:
+                # Handle the case where the item already exists
+                print("IntegrityError:", e)
 
         return post, author, categories, tags
 
@@ -330,9 +334,9 @@ class ScraperHandler:
                         link=link,
                         position=position
                     )
-                except IntegrityError:
-                    # Handle the case where the author already exists silently
-                    pass
+                except IntegrityError as e:
+                    # Handle the case where the item already exists
+                    print("IntegrityError:", e)
             except Exception as e:
                 # Log or handle any exceptions that occur during the process
                 print(f"Error occurred while parsing author details: {e}")
@@ -378,7 +382,7 @@ class ScraperHandler:
                         slug=slug,
                     )
                     items.append(item)
-                except IntegrityError:
+                except IntegrityError as e:
                     # Handle the case where the item already exists
-                    pass
+                    print("IntegrityError:", e)
         return items
