@@ -1,13 +1,54 @@
 from collections import defaultdict
 
-import models
+import models  # Assuming this is where your models are defined
 
 
 class ReportGenerator:
     def __init__(self, database_manager):
         self.database_manager = database_manager
 
-    def count_post_per_category(self, method='all', keyword_used=False):
+    def count_posts_by_category_or_tag(self, model, keyword_used, method, parsed_items):
+        counts = defaultdict(int)
+        print("Method:", method)  # Debug print to check the method
+
+        if method == 'all' or method is None:
+            for item in model.select():
+                if model == models.Category:
+                    counts[item.name] = models.PostCategory.select().where(
+                        models.PostCategory.category == item
+                    ).count()
+                elif model == models.Tag:
+                    counts[item.name] = models.PostTag.select().where(
+                        models.PostTag.tag == item
+                    ).count()
+
+        elif method == 'database':
+            if model == models.Category:
+                for post_category in models.PostCategory.select():
+                    counts[post_category.category.name] += 1
+            elif model == models.Tag:
+                for post_tag in models.PostTag.select():
+                    counts[post_tag.tag.name] += 1
+
+        elif method == 'current':
+            if bool(keyword_used):
+                print()
+                counts = defaultdict(int)
+                for parsed_item in parsed_items:
+                    if model == models.Category:
+                        for category in parsed_item['categories']:
+                            print(category)
+                            counts[category.name] += 1
+                    elif model == models.Tag:
+                        for tag in parsed_item['tags']:
+                            print(tag)
+                            counts[tag.name] += 1
+        else:
+            raise ValueError("Please use --keyword option to generate a report based on the current command.")
+
+        return counts
+
+    def count_post_per_category(self, method='all', keyword_used=None, parsed_items=None):
         """
         Generate a report on the number of saved posts in each category.
 
@@ -16,90 +57,40 @@ class ReportGenerator:
                 'all': Count based on all categories.
                 'database': Count based on categories stored in the database.
                 'current': Count based on categories in the current command.
-            keyword_used (bool): Indicates whether the --keyword option was used.
+            keyword_used (str): The keyword used for filtering posts, or None if not used.
+            parsed_items (list): List of parsed items containing post details.
 
         Returns:
             str: The category report.
         """
-        # Initialize a defaultdict to store the count of posts in each category
-        category_counts = defaultdict(int)
-
-        if method == 'all':
-            # Count based on all categories
-            for category in models.Category.select():
-                category_counts[category.name] = category.count
-
-        elif method == 'database':
-            # Count based on categories stored in the database
-            for post_category in models.PostCategory.select():
-                category_counts[post_category.category.name] += 1
-
-        elif method == 'current':
-            if keyword_used:
-                # Count based on categories in the current command
-                for post_category in models.PostCategory.raw(
-                        'SELECT category_id, COUNT(*) AS count FROM postcategory GROUP BY category_id'
-                ):
-                    category = models.Category.get_by_id(post_category.category_id)
-                    category_counts[category.name] = post_category.count
-            else:
-                # Handle the case when --keyword option is not used
-                print("Error: Please use --keyword option to generate a report based on the current command.")
-
-        # Format the results into a report string
+        category_counts = self.count_posts_by_category_or_tag(models.Category, keyword_used, method, parsed_items)
         report = "Category Report:\n"
         for category, count in category_counts.items():
             report += f"{category}: {count} posts\n"
-
         return report
 
-    def count_post_per_tag(self, method='all', keyword_used=False):
+    def count_post_per_tag(self, method='all', keyword_used=None, parsed_items=None):
         """
-        Generate a report on the number of saved posts associated with each tag.
+        Generate a report on the number of saved posts in each tag.
 
         Args:
             method (str): The method used to count the posts.
                 'all': Count based on all tags.
                 'database': Count based on tags stored in the database.
                 'current': Count based on tags in the current command.
-            keyword_used (bool): Indicates whether the --keyword option was used.
+            keyword_used (str): The keyword used for filtering posts, or None if not used.
+            parsed_items (list): List of parsed items containing post details.
 
         Returns:
             str: The tag report.
         """
-        # Initialize a defaultdict to store the count of posts for each tag
-        tag_counts = defaultdict(int)
-
-        if method == 'all':
-            # Count based on all tags
-            for tag in models.Tag.select():
-                tag_counts[tag.name] = tag.count
-
-        elif method == 'database':
-            # Count based on tags stored in the database
-            for post_tag in models.PostTag.select():
-                tag_counts[post_tag.tag.name] += 1
-
-        elif method == 'current':
-            if keyword_used:
-                # Count based on tags in the current command
-                for post_tag in models.PostTag.raw(
-                        'SELECT tag_id, COUNT(*) AS count FROM posttag GROUP BY tag_id'
-                ):
-                    tag = models.Tag.get_by_id(post_tag.tag_id)
-                    tag_counts[tag.name] = post_tag.count
-            else:
-                # Handle the case when --keyword option is not used
-                print("Error: Please use --keyword option to generate a report based on the current command.")
-
-        # Format the results into a report string
+        tag_counts = self.count_posts_by_category_or_tag(models.Tag, keyword_used, method, parsed_items)
         report = "Tag Report:\n"
         for tag, count in tag_counts.items():
             report += f"{tag}: {count} posts\n"
-
         return report
 
-    def count_post_per_author(self, method='database', keyword_used=False):
+    def count_post_per_author(self, method='database', keyword_used=None, parsed_items=None):
         """
         Generate a report on the number of saved posts authored by each author.
 
@@ -107,43 +98,32 @@ class ReportGenerator:
             method (str): The method used to count the posts.
                 'database': Count based on authors stored in the database.
                 'current': Count based on authors in the current command.
-            keyword_used (bool): Indicates whether the --keyword option was used.
+            keyword_used (str): The keyword used for filtering posts, or None if not used.
+            parsed_items (list): List of parsed items containing post details.
 
         Returns:
             str: The author report.
         """
-        # Initialize a defaultdict to store the count of posts for each author
+        if parsed_items is None:
+            return "Error: parsed_items is required."
+
         author_counts = defaultdict(int)
+        print("Method:", method)  # Debug print to check the method
 
         if method == 'database':
-            # Count based on authors stored in the database
             for post in models.Post.select():
                 author_counts[post.author.name] += 1
 
         elif method == 'current':
-            if keyword_used:
-                # Count based on authors in the current command
-                for post in models.Post.raw(
-                        'SELECT author_id, COUNT(*) AS count FROM post WHERE keyword_id = (SELECT id FROM keyword WHERE title = %s) GROUP BY author_id',
-                        args.keyword
-                ):
-                    author = models.Author.get_by_id(post.author_id)
-                    author_counts[author.name] = post.count
+            if bool(keyword_used):
+                author_counts = defaultdict(int)
+                for parsed_item in parsed_items:
+                    if parsed_item['author'] is not None:
+                        author_counts[parsed_item['author'].name] += 1
             else:
-                # Handle the case when --keyword option is not used
-                print("Error: Please use --keyword option to generate a report based on the current command.")
+                raise ValueError("Please use --keyword option to generate a report based on the current command.")
 
-        # Format the results into a report string
         report = "Author Report:\n"
         for author, count in author_counts.items():
             report += f"{author}: {count} posts\n"
-
         return report
-
-    def generate_report(self):
-        # Function to generate a comprehensive report
-        pass
-
-    def export_report(self, format='html'):
-        # Function to handle the export process
-        pass

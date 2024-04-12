@@ -1,10 +1,19 @@
 import time
 import datetime
 import requests
+import warnings
 from bs4 import BeautifulSoup
 from peewee import DoesNotExist, OperationalError, IntegrityError
 
 import models
+
+# Suppress BeautifulSoup warnings
+warnings.filterwarnings(
+    "ignore",
+    message="The input looks more like a filename than markup. You may want to "
+            "open this file and pass the filehandle into Beautiful Soup.",
+    category=UserWarning
+)
 
 
 class ScraperHandler:
@@ -75,6 +84,7 @@ class ScraperHandler:
     def search_by_keyword(self, search_by_keyword_instance):
         # Method to perform search by keyword
         search_items = list()
+        parsed_items = list()
 
         for i in range(search_by_keyword_instance.page_count):
             # Iterate through search result pages
@@ -117,7 +127,9 @@ class ScraperHandler:
                         'tags': tags,
                     }
 
-                    print(idx + 1, data)
+                    parsed_items.append(data)
+
+                    # print(idx + 1, data)
 
             except Exception as e:
                 self.database_manager.db.rollback()  # Rollback transaction if an exception occurs
@@ -125,7 +137,7 @@ class ScraperHandler:
             else:
                 self.database_manager.db.commit()  # Commit transaction if no exceptions occur
 
-        return search_items
+        return search_items, parsed_items
 
     def extract_search_items(self, search_by_keyword, soup):
         # Method to extract search items from search result page
@@ -192,61 +204,14 @@ class ScraperHandler:
             return []
 
     def parse_all_posts(self, json_response):
-        # Method to parse all posts from JSON response
         all_posts_in_page = []
         authors = []
         all_categories = []
         all_tags = []
 
         for post_data in json_response:
-            post_id = int(post_data['id'])
+            post, author, categories, tags = self.parse_post_detail_from_data(post_data)
 
-            # Parse author, categories, and tags
-            author = self.parse_author(int(post_data['author']))
-            categories = self.parse_categories(category_ids=post_data['categories'])
-            tags = self.parse_tags(tag_ids=post_data['tags'])
-
-            # Check if post already exists in the database
-            try:
-                post = models.Post.get(models.Post.post_id == post_id)
-            except DoesNotExist:
-                try:
-                    # Post doesn't exist, create a new one
-                    post = models.Post.create(post_id=post_id,
-                                              created_date=post_data['date'],
-                                              modified_date=post_data['modified'],
-                                              slug=post_data['slug'],
-                                              status=self.clean_view(post_data['status']),
-                                              post_type=self.clean_view(post_data['type']),
-                                              link=post_data['link'],
-                                              title=self.clean_view(post_data['title']['rendered']),
-                                              content=self.clean_view(post_data['content']['rendered']),
-                                              excerpt=self.clean_view(post_data['excerpt']['rendered']),
-                                              author_id=int(post_data['author']),
-                                              featured_media_link=post_data['jetpack_featured_media_url'],
-                                              post_format=post_data['format'],
-                                              )
-                except IntegrityError as e:
-                    # Handle the case where the item already exists
-                    print("IntegrityError:", e)
-
-            for category in categories:
-                try:
-                    models.PostCategory.get_or_create(post=post, category=category)
-                except IntegrityError as e:
-                    # Handle the case where the item already exists
-                    print("IntegrityError:", e)
-
-            # After parsing categories and tags for each post
-            # Create associations with the post
-            for tag in tags:
-                try:
-                    models.PostTag.get_or_create(post=post, tag=tag)
-                except IntegrityError as e:
-                    # Handle the case where the item already exists
-                    print("IntegrityError:", e)
-
-            # Append to lists
             all_posts_in_page.append(post)
             authors.append(author)
             all_categories.extend(categories)
@@ -255,78 +220,85 @@ class ScraperHandler:
         return all_posts_in_page, authors, all_categories, all_tags
 
     def parse_post_detail(self, slug):
-        # Method to parse post details
         post_response = self.request_to_target_url(self.posturl.format(slug=slug))
         json_response = post_response.json()
 
-        post_id = int(json_response[0]['id'])
+        return self.parse_post_detail_from_data(json_response[0])
 
-        # Parse author, categories, and tags
-        author = self.parse_author(int(json_response[0]['author']))
-        categories = self.parse_categories(category_ids=json_response[0]['categories'])
-        tags = self.parse_tags(tag_ids=json_response[0]['tags'])
+    def parse_post_detail_from_data(self, post_data):
+        post_id = int(post_data['id'])
 
-        # Check if post already exists in the database
+        author = self.parse_author(int(post_data['author']))
+        categories = self.parse_categories(category_ids=post_data['categories'])
+        tags = self.parse_tags(tag_ids=post_data['tags'])
+
         try:
             post = models.Post.get(models.Post.post_id == post_id)
         except DoesNotExist:
             try:
-                # Post doesn't exist, create a new one
-                post = models.Post.create(post_id=post_id,
-                                          created_date=json_response[0]['date'],
-                                          modified_date=json_response[0]['modified'],
-                                          slug=json_response[0]['slug'],
-                                          status=self.clean_view(json_response[0]['status']),
-                                          post_type=self.clean_view(json_response[0]['type']),
-                                          link=json_response[0]['link'],
-                                          title=self.clean_view(json_response[0]['title']['rendered']),
-                                          content=self.clean_view(json_response[0]['content']['rendered']),
-                                          excerpt=self.clean_view(json_response[0]['excerpt']['rendered']),
-                                          author_id=int(json_response[0]['author']),
-                                          featured_media_link=json_response[0]['jetpack_featured_media_url'],
-                                          post_format=json_response[0]['format'],
-                                          )
+                post = models.Post.create(
+                    post_id=post_id,
+                    created_date=post_data['date'],
+                    modified_date=post_data['modified'],
+                    slug=post_data['slug'],
+                    status=self.clean_view(post_data['status']),
+                    post_type=self.clean_view(post_data['type']),
+                    link=post_data['link'],
+                    title=self.clean_view(post_data['title']['rendered']),
+                    content=self.clean_view(post_data['content']['rendered']),
+                    excerpt=self.clean_view(post_data['excerpt']['rendered']),
+                    author_id=int(post_data['author']),
+                    featured_media_link=post_data['jetpack_featured_media_url'],
+                    post_format=post_data['format'],
+                )
             except IntegrityError as e:
-                # Handle the case where the item already exists
                 print("IntegrityError:", e)
 
         for category in categories:
             try:
                 models.PostCategory.get_or_create(post=post, category=category)
             except IntegrityError as e:
-                # Handle the case where the item already exists
                 print("IntegrityError:", e)
 
-        # After parsing categories and tags for each post
-        # Create associations with the post
         for tag in tags:
             try:
                 models.PostTag.get_or_create(post=post, tag=tag)
             except IntegrityError as e:
-                # Handle the case where the item already exists
                 print("IntegrityError:", e)
 
         return post, author, categories, tags
 
     def parse_author(self, author_id):
-        # Method to parse author details
-        author = None  # Initialize author variable
+        author = None
+
         try:
             # Attempt to retrieve the author from the database
             author = models.Author.get(models.Author.author_id == author_id)
         except DoesNotExist:
-            # If author doesn't exist, fetch author details from URL
-            response = self.request_to_target_url(self.authorsurl.format(id=author_id))
             try:
+                # Fetch author details from URL
+                response = self.request_to_target_url(self.authorsurl.format(id=author_id))
+                response.raise_for_status()  # Raise HTTPError for bad status codes
                 json_response = response.json()
-                # Extract author details from JSON response
-                name = self.clean_view(json_response['name'])
-                description = self.clean_view(json_response['cbDescription'])
-                link = json_response['link']
-                position = self.clean_view(json_response['position'])
 
-                # Create or get author instance
-                try:
+                if not json_response:
+                    # If json_response is empty, create a null author entry in the database
+                    author, _ = models.Author.get_or_create(
+                        author_id=author_id,
+                        name="Not Found",
+                        description="Author not found",
+                        link="",
+                        position=""
+                    )
+                    print("Null Author created:", author_id)
+                else:
+                    # Extract author details from JSON response
+                    name = self.clean_view(json_response['name'])
+                    description = self.clean_view(json_response.get('cbDescription', 'No description available'))
+                    link = json_response.get('link', '')
+                    position = self.clean_view(json_response.get('position', ''))
+
+                    # Create or get author instance
                     author, _ = models.Author.get_or_create(
                         author_id=author_id,
                         name=name,
@@ -334,11 +306,32 @@ class ScraperHandler:
                         link=link,
                         position=position
                     )
-                except IntegrityError as e:
-                    # Handle the case where the item already exists
-                    print("IntegrityError:", e)
+            except requests.exceptions.HTTPError as http_err:
+                if http_err.response.status_code == 404:
+                    # Handle 404 error: Author not found, create a null author entry
+                    author, _ = models.Author.get_or_create(
+                        author_id=author_id,
+                        name="Not Found",
+                        description="Author not found",
+                        link="",
+                        position=""
+                    )
+                    print("Null Author created:", author_id)
+                elif http_err.response.status_code == 401:
+                    # Handle 401 error: Unauthorized, create a null author entry
+                    author, _ = models.Author.get_or_create(
+                        author_id=author_id,
+                        name="Not Authorized",
+                        description="Access unauthorized",
+                        link="",
+                        position=""
+                    )
+                    print("Not Authorized Author created:", author_id)
+                else:
+                    # Handle other HTTP errors
+                    print(f"HTTPError occurred while fetching author details: {http_err}")
             except Exception as e:
-                # Log or handle any exceptions that occur during the process
+                # Log or handle any other exceptions that occur during the process
                 print(f"Error occurred while parsing author details: {e}")
 
         return author

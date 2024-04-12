@@ -18,14 +18,14 @@ def parse_arguments():
         argparse.Namespace: An object containing the parsed arguments.
     """
     parser = argparse.ArgumentParser(description='Scraping Tool')
-    parser.add_argument('--fetch-all', action='store_true', help='Fetch all pages of posts')
-    parser.add_argument('--keyword', type=str, help='Perform keyword search')
-    parser.add_argument('--page-count', type=int, default=SEARCH_PAGE_COUNT,
+    parser.add_argument('-f', '--fetch-all', action='store_true', help='Fetch all pages of posts')
+    parser.add_argument('-k', '--keyword', type=str, help='Perform keyword search')
+    parser.add_argument('-p', '--page-count', type=int, default=SEARCH_PAGE_COUNT,
                         help='Number of pages to search for keyword')
-    parser.add_argument('--generate-report', action='store_true', help='Generate report')
-    parser.add_argument('--report-type', choices=['category', 'tag', 'author'],
+    parser.add_argument('-g', '--generate-report', action='store_true', help='Generate report')
+    parser.add_argument('-r', '--report-type', choices=['category', 'tag', 'author'],
                         help='Type of report to generate')
-    parser.add_argument('--report-method', choices=['all', 'database', 'current'],
+    parser.add_argument('-m', '--report-method', choices=['all', 'database', 'current'],
                         help='Method for generating report')
 
     return parser.parse_args()
@@ -72,6 +72,11 @@ if __name__ == "__main__":
         # Initialize the ReportGenerator
         report_generator = ReportGenerator(database_manager)
 
+        # print("Arguments given:", args)
+        # print("Keyword argument:", args.keyword)
+        # print("Report type argument:", args.report_type)
+        # print("Report method argument:", args.report_method)
+
         if args.fetch_all:
             # Fetch all pages
             scraper_handler.fetch_all_pages()
@@ -83,58 +88,183 @@ if __name__ == "__main__":
             page_count = args.page_count
 
             search_by_keyword = models.SearchByKeyword.create(keyword=keyword, page_count=page_count)
-            scraper_handler.search_by_keyword(search_by_keyword_instance=search_by_keyword)
+            searech_items, parsed_items = scraper_handler.search_by_keyword(
+                search_by_keyword_instance=search_by_keyword
+            )
+
+            # After performing keyword search, generate reports if requested
+            if args.generate_report:
+
+                argkeyword = args.keyword
+                method = args.report_method
+
+                if args.report_type == 'category':
+                    if args.report_method == 'all' or args.report_method == 'database' or args.report_method is None:
+                        print(
+                            report_generator.count_post_per_category(
+                                keyword_used=argkeyword,
+                                method=method,
+                                parsed_items=parsed_items
+
+                            )
+                        )
+                    elif args.report_method == 'current':
+                        print(
+                            report_generator.count_post_per_category(
+                                keyword_used=argkeyword,
+                                method=method,
+                                parsed_items=parsed_items
+                            )
+                        )
+
+                elif args.report_type == 'tag':
+                    if args.report_method == 'all' or args.report_method == 'database' or args.report_method is None:
+                        print(
+                            report_generator.count_post_per_tag(
+                                keyword_used=keyword.id,  # Pass keyword ID instead of title
+                                method=method,
+                                parsed_items=parsed_items
+                            )
+                        )
+                    elif args.report_method == 'current':
+                        print(
+                            report_generator.count_post_per_tag(
+                                keyword_used=keyword.id,  # Pass keyword ID instead of title
+                                method=method,
+                                parsed_items=parsed_items
+                            )
+                        )
+
+                elif args.report_type == 'author':
+                    if args.report_method == 'database':
+                        print(
+                            report_generator.count_post_per_author(
+                                keyword_used=argkeyword,
+                                method=method,
+                                parsed_items=parsed_items
+                            )
+                        )
+                    elif args.report_method == 'current':
+                        print(
+                            report_generator.count_post_per_author(
+                                keyword_used=argkeyword,
+                                method=method,
+                                parsed_items=parsed_items
+                            )
+                        )
+                    elif args.report_method == 'all':
+                        print('report countof author in the techcrunch is not implemented')
+
+                else:
+                    print("Error: Please specify a valid report type.")
 
         elif args.generate_report:
+
+            argkeyword = args.keyword
+            method = args.report_method
+            parsed_items = None
+
+            # Generate report for all categories/tags/authors or for the database
             if args.report_type == 'category':
-                if args.report_method == 'all' or args.report_method == 'database':
+                if args.report_method == 'all' or args.report_method == 'database' or args.report_method is None:
                     print(
                         report_generator.count_post_per_category(
-                            keyword_used=bool(args.keyword),
-                            method=args.report_method
+                            method=method,
                         )
                     )
-                elif args.report_method == 'current':
-                    print(
-                        report_generator.count_post_per_category(
-                            keyword_used=bool(args.keyword),
-                            method=args.report_method
-                        )
-                    )
+                else:
+                    print("Error: Please specify a valid report method for category report.")
 
             elif args.report_type == 'tag':
-                if args.report_method == 'all' or args.report_method == 'database':
+                if args.report_method == 'all' or args.report_method == 'database' or args.report_method is None:
                     print(
                         report_generator.count_post_per_tag(
-                            keyword_used=bool(args.keyword),
-                            method=args.report_method
+                            method=method,
                         )
                     )
-                elif args.report_method == 'current':
-                    print(
-                        report_generator.count_post_per_tag(
-                            keyword_used=bool(args.keyword),
-                            method=args.report_method
-                        )
-                    )
+                else:
+                    print("Error: Please specify a valid report method for tag report.")
 
             elif args.report_type == 'author':
                 if args.report_method == 'database':
-                    print(report_generator.count_post_per_author(
-                            keyword_used=bool(args.keyword),
-                            method=args.report_method
-                        )
-                    )
-                elif args.report_method == 'current':
                     print(
                         report_generator.count_post_per_author(
-                            keyword_used=bool(args.keyword),
-                            method=args.report_method
+                            method=method,
                         )
                     )
+                else:
+                    print("Error: Please specify 'database' as the report method for author report.")
 
             else:
                 print("Error: Please specify a valid report type.")
+
+        # if args.fetch_all:
+        #     # Fetch all pages
+        #     scraper_handler.fetch_all_pages()
+        #
+        # elif args.keyword:
+        #     # Perform keyword search
+        #     keyword_title = args.keyword
+        #     keyword, _ = models.Keyword.get_or_create(title=keyword_title)
+        #     page_count = args.page_count
+        #
+        #     search_by_keyword = models.SearchByKeyword.create(keyword=keyword, page_count=page_count)
+        #     scraper_handler.search_by_keyword(search_by_keyword_instance=search_by_keyword)
+        #
+        # elif args.generate_report:
+        #       argkeyword = args.keyword
+        #       method = args.report_method
+        #     if args.report_type == 'category':
+        #         if args.report_method == 'all' or args.report_method == 'database' or args.report_method is None:
+        #             print(
+        #                 report_generator.count_post_per_category(
+        #                     keyword_used=argkeyword,
+        #                     method=args.report_method
+        #                 )
+        #             )
+        #         elif args.report_method == 'current':
+        #             print(
+        #                 report_generator.count_post_per_category(
+        #                     keyword_used=argkeyword,
+        #                     method=args.report_method
+        #                 )
+        #             )
+        #
+        #     elif args.report_type == 'tag':
+        #         if args.report_method == 'all' or args.report_method == 'database' or args.report_method is None:
+        #             print(
+        #                 report_generator.count_post_per_tag(
+        #                     keyword_used=argkeyword,
+        #                     method=args.report_method
+        #                 )
+        #             )
+        #         elif args.report_method == 'current':
+        #             print(
+        #                 report_generator.count_post_per_tag(
+        #                     keyword_used=argkeyword,
+        #                     method=args.report_method
+        #                 )
+        #             )
+        #
+        #     elif args.report_type == 'author':
+        #         if args.report_method == 'database':
+        #             print(report_generator.count_post_per_author(
+        #                 keyword_used=argkeyword,
+        #                 method=args.report_method
+        #             )
+        #             )
+        #         elif args.report_method == 'current':
+        #             print(
+        #                 report_generator.count_post_per_author(
+        #                     keyword_used=argkeyword,
+        #                     method=args.report_method
+        #                 )
+        #             )
+        #         elif args.report_method == 'all':
+        #             print('report countof author in the techcrunch is not implemented')
+        #
+        #     else:
+        #         print("Error: Please specify a valid report type.")
 
     except KeyboardInterrupt:
         print("KeyboardInterrupt: Program terminated.")
