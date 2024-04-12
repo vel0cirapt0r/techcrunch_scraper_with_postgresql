@@ -122,6 +122,7 @@ class ScraperHandler:
                         'author_id': post.author_id,
                         'featured_media_link': post.featured_media_link,
                         'post_format': post.post_format,
+                        'post': post,
                         'author': author,
                         'categories': categories,
                         'tags': tags,
