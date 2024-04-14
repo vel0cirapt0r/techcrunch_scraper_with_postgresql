@@ -4,6 +4,7 @@ import requests
 import warnings
 from bs4 import BeautifulSoup
 from peewee import DoesNotExist, OperationalError, IntegrityError
+import logging
 
 import models
 
@@ -32,7 +33,7 @@ class ScraperHandler:
         for attempt in range(retries):
             try:
                 response = requests.get(url)
-                print(response.url)
+                # print(response.url)
                 # print(response.status_code)
                 response.raise_for_status()  # Raise HTTPError for bad status codes
                 return response
@@ -159,27 +160,34 @@ class ScraperHandler:
 
     def parse_search_item(self, search_by_keyword, search_result_item):
         # Method to parse individual search item
-        item_url = search_result_item.find('a')['href']  # Extract the URL of the search result item
-        item_slug = item_url.split('/')[-2]  # Extract the slug from the URL
-        post_data = self.parse_post_detail(slug=item_slug)
         try:
-            post_id = post_data[0].post_id  # Get the post ID from the parsed post detail
-            try:
-                # Create a new search item
-                search_item = models.PostSearchByKeywordItem.create(
-                    search_by_keyword=search_by_keyword,
-                    title=search_result_item.text,
-                    url=item_url,
-                    slug=item_slug,
-                    post=post_id,
-                    created_at=datetime.datetime.now()
-                )
-            except IntegrityError as e:
-                # Handle the case where the item already exists
-                print("IntegrityError:", e)
-            return search_item
-        except:
-            return None
+            item_url = search_result_item.find('a')['href']  # Extract the URL of the search result item
+            item_slug = item_url.split('/')[-2]  # Extract the slug from the URL
+            post_data = self.parse_post_detail(slug=item_slug)
+
+            if post_data:
+                post_id = post_data[0].post_id  # Get the post ID from the parsed post detail
+                try:
+                    # Create a new search item
+                    search_item = models.PostSearchByKeywordItem.create(
+                        search_by_keyword=search_by_keyword,
+                        title=search_result_item.text,
+                        url=item_url,
+                        slug=item_slug,
+                        post=post_id,
+                        created_at=datetime.datetime.now()
+                    )
+                    return search_item
+                except IntegrityError as e:
+                    # Handle the case where the item already exists
+                    logging.error("IntegrityError: %s", e)
+            else:
+                logging.error("No post data found for slug: %s", item_slug)
+        except IndexError:
+            logging.error("IndexError occurred while parsing post_data.")
+        except Exception as e:
+            logging.error("An unexpected error occurred: %s", e)
+        return None
 
     def fetch_all_pages(self):
         # Method to fetch all pages of posts

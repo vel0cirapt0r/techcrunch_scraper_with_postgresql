@@ -111,14 +111,24 @@ if __name__ == "__main__":
                         keyword_used=args.keyword,
                         parsed_items=parsed_items
                     )
-                    report_generator.export_report(report_content, keyword, parsed_items, args.file_format)
+                    report_generator.export_report(
+                        report_content=report_content,
+                        keyword=keyword,
+                        parsed_items=parsed_items,
+                        file_format=args.file_format
+                    )
                 elif args.report_type == 'author':
                     report_content, data = report_generator.count_post_per_author(
                         method=args.report_method,
                         keyword_used=args.keyword,
                         parsed_items=parsed_items
                     )
-                    report_generator.export_report(report_content, keyword, parsed_items, args.file_format)
+                    report_generator.export_report(
+                        report_content=report_content,
+                        keyword=keyword,
+                        parsed_items=parsed_items,
+                        file_format=args.file_format
+                    )
                 else:
                     print("Error: Please specify a valid report type.")
 
@@ -236,8 +246,6 @@ if __name__ == "__main__":
                 print('report countof author in the techcrunch is not implemented')
         else:
             print("Error: Please specify a valid option.")
-
-
 
     except KeyboardInterrupt:
         print("KeyboardInterrupt: Program terminated.")
