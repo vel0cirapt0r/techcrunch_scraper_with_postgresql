@@ -104,25 +104,23 @@ if __name__ == "__main__":
                         keyword_used=args.keyword,
                         parsed_items=parsed_items
                     )
+                    report_generator.export_report(report_content, data, keyword, parsed_items, args.file_format)
                 elif args.report_type == 'tag':
                     report_content, data = report_generator.count_post_per_tag(
                         method=args.report_method,
                         keyword_used=args.keyword,
                         parsed_items=parsed_items
                     )
+                    report_generator.export_report(report_content, keyword, parsed_items, args.file_format)
                 elif args.report_type == 'author':
                     report_content, data = report_generator.count_post_per_author(
                         method=args.report_method,
                         keyword_used=args.keyword,
                         parsed_items=parsed_items
                     )
-                else:
-                    print("Error: Please specify a valid report type.")
-
-                if bool(args.file_format):
                     report_generator.export_report(report_content, keyword, parsed_items, args.file_format)
                 else:
-                    print("Error: Please specify a file format.")
+                    print("Error: Please specify a valid report type.")
 
             elif args.report_type == 'category':
                 if args.report_method == 'all' or args.report_method == 'database' or args.report_method is None:
@@ -130,14 +128,17 @@ if __name__ == "__main__":
                         keyword_used=argkeyword,
                         method=method,
                         parsed_items=parsed_items
-
                     )
+                    print(report)
+                    report_generator.draw_chart(data)
                 elif args.report_method == 'current':
                     report, data = report_generator.count_post_per_category(
                         keyword_used=argkeyword,
                         method=method,
                         parsed_items=parsed_items
                     )
+                    print(report)
+                    report_generator.draw_chart(data)
             elif args.report_type == 'tag':
                 if args.report_method == 'all' or args.report_method == 'database' or args.report_method is None:
                     report, data = report_generator.count_post_per_tag(
@@ -145,12 +146,16 @@ if __name__ == "__main__":
                         method=method,
                         parsed_items=parsed_items
                     )
+                    print(report)
+                    report_generator.draw_chart(data)
                 elif args.report_method == 'current':
                     report, data = report_generator.count_post_per_tag(
                         keyword_used=keyword.id,
                         method=method,
                         parsed_items=parsed_items
                     )
+                    print(report)
+                    report_generator.draw_chart(data)
             elif args.report_type == 'author':
                 if args.report_method == 'database':
                     report, data = report_generator.count_post_per_author(
@@ -158,27 +163,22 @@ if __name__ == "__main__":
                         method=method,
                         parsed_items=parsed_items
                     )
+                    print(report)
+                    report_generator.draw_chart(data)
                 elif args.report_method == 'current':
                     report, data = report_generator.count_post_per_author(
                         keyword_used=argkeyword,
                         method=method,
                         parsed_items=parsed_items
                     )
+                    print(report)
+                    report_generator.draw_chart(data)
                 elif args.report_method == 'all':
                     print('report countof author in the techcrunch is not implemented')
-            else:
-                print("Error: Please specify a valid report type.")
 
-        # elif args.generate_report:
-        #     # Generate report for all categories/tags/authors or for the database
-        #     if args.report_type == 'category':
-        #         report_content, data = report_generator.count_post_per_category(method=args.report_method)
-        #     elif args.report_type == 'tag':
-        #         report_content, data = report_generator.count_post_per_tag(method=args.report_method)
-        #     elif args.report_type == 'author':
-        #         report_content, data = report_generator.count_post_per_author(method=args.report_method)
-        #     else:
-        #         print("Error: Please specify a valid report type.")
+            else:
+                for idx, parsed_item in enumerate(parsed_items):
+                    print(f'post {idx}: ', parsed_item)
 
         elif args.report_type == 'category':
             if args.report_method == 'all' or args.report_method == 'database' or args.report_method is None:
@@ -188,12 +188,16 @@ if __name__ == "__main__":
                     parsed_items=parsed_items
 
                 )
+                print(report)
+                report_generator.draw_chart(data)
             elif args.report_method == 'current':
                 report, data = report_generator.count_post_per_category(
                     keyword_used=argkeyword,
                     method=method,
                     parsed_items=parsed_items
                 )
+                print(report)
+                report_generator.draw_chart(data)
         elif args.report_type == 'tag':
             if args.report_method == 'all' or args.report_method == 'database' or args.report_method is None:
                 report, data = report_generator.count_post_per_tag(
@@ -201,12 +205,16 @@ if __name__ == "__main__":
                     method=method,
                     parsed_items=parsed_items
                 )
+                print(report)
+                report_generator.draw_chart(data)
             elif args.report_method == 'current':
                 report, data = report_generator.count_post_per_tag(
                     keyword_used=keyword.id,  # Pass keyword ID instead of title
                     method=method,
                     parsed_items=parsed_items
                 )
+                print(report)
+                report_generator.draw_chart(data)
         elif args.report_type == 'author':
             if args.report_method == 'database':
                 report, data = report_generator.count_post_per_author(
@@ -214,20 +222,22 @@ if __name__ == "__main__":
                     method=method,
                     parsed_items=parsed_items
                 )
+                print(report)
+                report_generator.draw_chart(data)
             elif args.report_method == 'current':
                 report, data = report_generator.count_post_per_author(
                     keyword_used=argkeyword,
                     method=method,
                     parsed_items=parsed_items
                 )
+                print(report)
+                report_generator.draw_chart(data)
             elif args.report_method == 'all':
                 print('report countof author in the techcrunch is not implemented')
         else:
             print("Error: Please specify a valid option.")
 
-        if bool(report):
-            print(report)
-            report_generator.draw_chart(data)
+
 
     except KeyboardInterrupt:
         print("KeyboardInterrupt: Program terminated.")

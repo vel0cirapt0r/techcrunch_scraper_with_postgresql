@@ -8,7 +8,10 @@ import re
 import matplotlib.pyplot as plt
 import requests
 from openpyxl import Workbook
-import models  # Assuming this is where your models are defined
+from requests.exceptions import ChunkedEncodingError
+
+import models
+import scraper_handler
 
 
 class ReportGenerator:
@@ -17,7 +20,7 @@ class ReportGenerator:
 
     def count_posts_by_category_or_tag(self, model, keyword_used, method, parsed_items):
         counts = defaultdict(int)
-        print("Method:", method)  # Debug print to check the method
+        # print("Method:", method)  # Debug print to check the method
 
         if method == 'all' or method is None:
             for item in model.select():
@@ -40,16 +43,15 @@ class ReportGenerator:
 
         elif method == 'current':
             if bool(keyword_used):
-                print()
                 counts = defaultdict(int)
                 for parsed_item in parsed_items:
                     if model == models.Category:
                         for category in parsed_item['categories']:
-                            print(category)
+                            # print(category)
                             counts[category.name] += 1
                     elif model == models.Tag:
                         for tag in parsed_item['tags']:
-                            print(tag)
+                            # print(tag)
                             counts[tag.name] += 1
         else:
             raise ValueError("Please use --keyword option to generate a report based on the current command.")
@@ -116,7 +118,7 @@ class ReportGenerator:
             return "Error: parsed_items is required."
 
         author_counts = defaultdict(int)
-        print("Method:", method)  # Debug print to check the method
+        # print("Method:", method)  # Debug print to check the method
 
         if method == 'database':
             for post in models.Post.select():
@@ -136,7 +138,7 @@ class ReportGenerator:
             report += f"{author}: {count} posts\n"
         return report, author_counts
 
-    def draw_chart(self, report, save_path=None):
+    def draw_chart(self, report, keyword=None, save_path=None):
         # Extract categories and counts from the report
         categories = list(report.keys())
         counts = list(report.values())
@@ -153,9 +155,10 @@ class ReportGenerator:
         plt.tight_layout()
 
         # Save the chart if save_path is provided
-        if save_path:
-            plt.savefig(save_path)
-            print(f"Chart saved as {save_path}")
+        if bool(save_path):
+            chart_path = os.path.join(save_path, f"report_{keyword}_chart.png")
+            plt.savefig(chart_path)
+            print(f"Chart saved as {chart_path}")
 
         # Show the chart if save_path is not provided (bool(save_path) will be False)
         if not bool(save_path):
@@ -164,60 +167,279 @@ class ReportGenerator:
             plt.close()  # Close the plot if save_path is provided
 
     def download_images_and_save_models(self, parsed_items, save_path, file_format='xls'):
-        # Create a directory to save the downloaded images
-        image_dir = os.path.join(save_path, 'images')
-        os.makedirs(image_dir, exist_ok=True)
 
-        # Download images from the featured_media_link field
+        print("Downloading images and saving models...")
+
+        # Create a directory to save the downloaded images
+        html_dir = os.path.join(save_path, 'html')
+        image_dir = os.path.join(save_path, 'images')
+        json_dir = os.path.join(save_path, 'json')
+        csv_dir = os.path.join(save_path, 'csv')
+        exel_dir = os.path.join(save_path, 'exel')
+        os.makedirs(image_dir, exist_ok=True)
+        os.makedirs(html_dir, exist_ok=True)
+
+        # Download images from the featured_media_link field and HTML content from the link field
         for item in parsed_items:
             image_url = item.get('featured_media_link')
             if image_url:
                 image_name = os.path.basename(image_url)
                 image_path = os.path.join(image_dir, image_name)
-                with open(image_path, 'wb') as f:
+                try:
                     response = requests.get(image_url)
-                    f.write(response.content)
+                    response.raise_for_status()  # Raise an error for HTTP errors
+                    with open(image_path, 'wb') as f:
+                        f.write(response.content)
+                except ChunkedEncodingError as e:
+                    print(f"ChunkedEncodingError occurred for {image_url}: {e}")
+                except requests.exceptions.RequestException as e:
+                    print(f"Error downloading {image_url}: {e}")
 
-        # Download HTML content from the link field
-        for item in parsed_items:
             link_url = item.get('link')
             if link_url:
                 html_name = f"{self.sanitize_filename(item['title'])}.html"
-                html_path = os.path.join(save_path, html_name)
-                with open(html_path, 'wb') as f:
+                html_path = os.path.join(html_dir, html_name)
+                try:
                     response = requests.get(link_url)
-                    f.write(response.content)
+                    response.raise_for_status()  # Raise an error for HTTP errors
+                    with open(html_path, 'wb') as f:
+                        f.write(response.content)
+                except ChunkedEncodingError as e:
+                    print(f"ChunkedEncodingError occurred for {link_url}: {e}")
+                except requests.exceptions.RequestException as e:
+                    print(f"Error downloading {link_url}: {e}")
+        print("Images downloaded and HTML content saved.")
+
+        # Convert datetime objects to strings
+        for item in parsed_items:
+            item['created_date'] = item['created_date'].strftime('%Y-%m-%d %H:%M:%S')
+            item['modified_date'] = item['modified_date'].strftime('%Y-%m-%d %H:%M:%S')
+
+        # print("Datetime objects converted to strings.")
 
         # Save models in the specified format
-        if file_format == 'json':
-            with open(os.path.join(save_path, f'data.{file_format}'), 'w') as json_file:
-                json.dump(parsed_items, json_file, indent=4)
-        elif file_format == 'csv':
-            with open(os.path.join(save_path, f'data.{file_format}'), 'w', newline='') as csv_file:
-                writer = csv.DictWriter(csv_file, fieldnames=parsed_items[0].keys())
-                writer.writeheader()
-                writer.writerows(parsed_items)
-        elif file_format == 'xls':
-            wb = Workbook()
-            ws = wb.active
-            for row, item in enumerate(parsed_items, start=1):
-                for col, field_value in enumerate(item.values(), start=1):
-                    ws.cell(row=row, column=col, value=field_value)
-            wb.save(os.path.join(save_path, f'data.{file_format}'))
+        for item in parsed_items:
 
-    def export_report(self, report_content, keyword, parsed_items, file_format):
+            # Save data in the specified format
+            if file_format == "csv":
+                os.makedirs(csv_dir, exist_ok=True)
+                slug = self.save_as_csv(item, csv_dir)
+                print(f"CSV file saved: {os.path.join(csv_dir, slug)}.csv")
+
+            elif file_format == "xls":
+                os.makedirs(exel_dir, exist_ok=True)
+                slug = self.save_as_xls(item, exel_dir)
+                print(f"XLS file saved: {os.path.join(exel_dir, slug)}.xls")
+
+            elif file_format == 'json':
+                os.makedirs(json_dir, exist_ok=True)
+                slug = self.save_as_json(item, json_dir)
+                print(f"JSON file saved: {os.path.join(json_dir, slug)}.json")
+
+        print("All data saved successfully.")
+
+    def save_as_csv(self, item, save_path):
+        # Create a folder for each post
+        post = item['post']
+        slug = post.slug
+        post_dir = os.path.join(save_path, post.slug)
+        os.makedirs(post_dir, exist_ok=True)
+
+        # Save post data to a CSV file
+        post_data = {
+            'post_id': post.post_id,
+            'title': post.title,
+            'created_date': item['created_date'],
+            'modified_date': item['modified_date'],
+            'slug': post.slug,
+            'status': post.status,
+            'post_type': post.post_type,
+            'link': post.link,
+            'content': post.content,
+            'excerpt': post.excerpt
+        }
+        self.save_csv_file(post_data, post_dir, 'post.csv')
+
+        # Save author data to a CSV file
+        author_data = {
+            'author_id': item['author'].author_id,
+            'name': item['author'].name,
+            'description': item['author'].description,
+            'link': item['author'].link,
+            'position': item['author'].position
+        }
+        self.save_csv_file(author_data, post_dir, 'author.csv')
+
+        # Save categories data to a CSV file
+        categories_data = [{'name': category.name,
+                            'description': category.description,
+                            'link': category.link,
+                            'slug': category.slug} for category in item['categories']]
+        self.save_csv_file_list(categories_data, post_dir, 'categories.csv')
+
+        # Save tags data to a CSV file
+        tags_data = [{'name': tag.name,
+                      'description': tag.description,
+                      'link': tag.link,
+                      'slug': tag.slug} for tag in item['tags']]
+        self.save_csv_file_list(tags_data, post_dir, 'tags.csv')
+
+        return slug
+
+    def save_csv_file(self, data, save_path, filename):
+        csv_file_path = os.path.join(save_path, filename)
+        with open(csv_file_path, 'w', newline='', encoding='utf-8') as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=data.keys())
+            writer.writeheader()
+            writer.writerow(data)
+
+    def save_csv_file_list(self, data_list, save_path, filename):
+        if not data_list:
+            print(f"No data to save in {filename}")
+            return
+
+        csv_file_path = os.path.join(save_path, filename)
+        with open(csv_file_path, 'w', newline='', encoding='utf-8') as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=data_list[0].keys())
+            writer.writeheader()
+            writer.writerows(data_list)
+
+    def save_as_xls(self, item, save_path):
+        # Create a folder for each post
+        post = item['post']
+        slug = post.slug
+        post_dir = os.path.join(save_path, post.slug)
+        os.makedirs(post_dir, exist_ok=True)
+
+        # Save post data
+        post_data = {
+            'post_id': post.post_id,
+            'title': post.title,
+            'created_date': item['created_date'],
+            'modified_date': item['modified_date'],
+            'slug': post.slug,
+            'status': post.status,
+            'post_type': post.post_type,
+            'link': post.link,
+            'content': post.content,
+            'excerpt': post.excerpt
+        }
+        self.save_excel_file(post_data, post_dir, 'post.xls')
+
+        # Save author data
+        author_data = {
+            'author_id': item['author'].author_id,
+            'name': item['author'].name,
+            'description': item['author'].description,
+            'link': item['author'].link,
+            'position': item['author'].position
+        }
+        self.save_excel_file(author_data, post_dir, 'author.xls')
+
+        # Save categories data
+        categories_data = [{'name': category.name,
+                            'description': category.description,
+                            'link': category.link,
+                            'slug': category.slug} for category in item['categories']]
+        self.save_excel_file_list(categories_data, post_dir, 'categories.xls')
+
+        # Save tags data
+        tags_data = [{'name': tag.name,
+                      'description': tag.description,
+                      'link': tag.link,
+                      'slug': tag.slug} for tag in item['tags']]
+        self.save_excel_file_list(tags_data, post_dir, 'tags.xls')
+
+        return slug
+
+    def save_excel_file(self, data, save_path, filename):
+        xls_file_path = os.path.join(save_path, filename)
+        wb = Workbook()
+        ws = wb.active
+        for key, value in data.items():
+            ws.append([key, value])
+        wb.save(xls_file_path)
+        print(f"{filename} saved: {xls_file_path}")
+
+    def save_excel_file_list(self, data_list, save_path, filename):
+        xls_file_path = os.path.join(save_path, filename)
+        wb = Workbook()
+        ws = wb.active
+        for data in data_list:
+            for key, value in data.items():
+                ws.append([key, value])
+        wb.save(xls_file_path)
+        print(f"{filename} saved: {xls_file_path}")
+
+    def save_as_json(self, item, save_path):
+
+        post = item['post']
+        author = item['author']
+        categories = [{
+            'category_id': category.category_id,
+            'count': category.count,
+            'name': category.name,
+            'description': category.description,
+            'link': category.link,
+            'slug': category.slug
+        } for category in item['categories']]
+
+        tags = [{
+            'tag_id': tag.tag_id,
+            'count': tag.count,
+            'name': tag.name,
+            'description': tag.description,
+            'link': tag.link,
+            'slug': tag.slug
+        } for tag in item['tags']]
+
+        # Create a dictionary for the post data
+        post_data = {
+            'post_id': post.post_id,
+            'title': post.title,
+            'created_date': item['created_date'],
+            'modified_date': item['modified_date'],
+            'slug': post.slug,
+            'status': post.status,
+            'post_type': post.post_type,
+            'link': post.link,
+            'content': post.content,
+            'excerpt': post.excerpt,
+            'author': {
+                'author_id': author.author_id,
+                'name': author.name,
+                'description': author.description,
+                'link': author.link,
+                'position': author.position
+            },
+            'categories': categories,
+            'tags': tags,
+        }
+
+        print(f"Saving data for post: {post.title}")
+
+        json_file_path = os.path.join(save_path, f"{post_data['slug']}.json")
+        with open(json_file_path, 'w') as json_file:
+            json.dump(post_data, json_file, indent=4)
+
+        return post.slug
+
+    def export_report(self, report_content, data, keyword, parsed_items, file_format):
         # Create a new folder with keyword and current date
         folder_name = f"{keyword}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
         folder_path = os.path.join("output", folder_name)
         os.makedirs(folder_path)
 
         # Write report content to HTML file
-        report_file_path = os.path.join(folder_path, "report.html")
+        report_file_path = os.path.join(folder_path, "report.txt")
         with open(report_file_path, "w") as report_file:
             report_file.write(report_content)
 
+        # save chart
+        self.draw_chart(report=data, keyword=keyword, save_path=folder_path)
+
         # Copy related images (if any) to the folder
-        self.download_images_and_save_models(parsed_items, report_file_path, file_format)
+        self.download_images_and_save_models(parsed_items, folder_path, file_format)
 
         # Zip the folder
         zip_file_path = shutil.make_archive(folder_path, 'zip', folder_path)

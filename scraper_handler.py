@@ -27,19 +27,19 @@ class ScraperHandler:
         self.tagurl = tagurl
         self.allpostsurl = allpostsurl
 
-    def request_to_target_url(self, url, retries=3, backoff_factor=0.5):
+    def request_to_target_url(self, url, retries=3, backoff_factor=0.75):
         # Method to make HTTP requests with retries
         for attempt in range(retries):
             try:
                 response = requests.get(url)
-                # print(response.url)
+                print(response.url)
                 # print(response.status_code)
                 response.raise_for_status()  # Raise HTTPError for bad status codes
                 return response
             except (requests.RequestException, IOError) as e:
                 if attempt < retries - 1:
                     # Exponential backoff before retrying
-                    sleep_duration = backoff_factor * (2 ** attempt)
+                    sleep_duration = backoff_factor * (4 ** attempt)
                     time.sleep(sleep_duration)
                     continue
                 else:
@@ -110,13 +110,13 @@ class ScraperHandler:
                     post, author, categories, tags = self.parse_post_detail(slug=search_item.slug)
                     data = {
                         'post_id': post.post_id,
+                        'title': post.title,
                         'created_date': post.created_date,
                         'modified_date': post.modified_date,
                         'slug': post.slug,
                         'status': post.status,
                         'post_type': post.post_type,
                         'link': post.link,
-                        'title': post.title,
                         'content': post.content,
                         'excerpt': post.excerpt,
                         'author_id': post.author_id,
@@ -161,24 +161,25 @@ class ScraperHandler:
         # Method to parse individual search item
         item_url = search_result_item.find('a')['href']  # Extract the URL of the search result item
         item_slug = item_url.split('/')[-2]  # Extract the slug from the URL
-        post_id = self.parse_post_detail(slug=item_slug)[0].post_id  # Get the post ID from the parsed post detail
-        # print(post_id)
-
+        post_data = self.parse_post_detail(slug=item_slug)
         try:
-            # Create a new search item
-            search_item = models.PostSearchByKeywordItem.create(
-                search_by_keyword=search_by_keyword,
-                title=search_result_item.text,
-                url=item_url,
-                slug=item_slug,
-                post=post_id,
-                created_at=datetime.datetime.now()
-            )
-        except IntegrityError as e:
-            # Handle the case where the item already exists
-            print("IntegrityError:", e)
-
-        return search_item
+            post_id = post_data[0].post_id  # Get the post ID from the parsed post detail
+            try:
+                # Create a new search item
+                search_item = models.PostSearchByKeywordItem.create(
+                    search_by_keyword=search_by_keyword,
+                    title=search_result_item.text,
+                    url=item_url,
+                    slug=item_slug,
+                    post=post_id,
+                    created_at=datetime.datetime.now()
+                )
+            except IntegrityError as e:
+                # Handle the case where the item already exists
+                print("IntegrityError:", e)
+            return search_item
+        except:
+            return None
 
     def fetch_all_pages(self):
         # Method to fetch all pages of posts
@@ -221,10 +222,18 @@ class ScraperHandler:
         return all_posts_in_page, authors, all_categories, all_tags
 
     def parse_post_detail(self, slug):
-        post_response = self.request_to_target_url(self.posturl.format(slug=slug))
-        json_response = post_response.json()
+        try:
+            post_response = self.request_to_target_url(self.posturl.format(slug=slug))
+            json_response = post_response.json()
 
-        return self.parse_post_detail_from_data(json_response[0])
+            if not json_response:
+                print("JSON response is empty for slug:", slug)
+                return None, None, None, None
+
+            return self.parse_post_detail_from_data(json_response[0])
+        except Exception as e:
+            print(f"Error occurred while parsing post detail for slug {slug}: {e}")
+            return None, None, None, None
 
     def parse_post_detail_from_data(self, post_data):
         post_id = int(post_data['id'])
