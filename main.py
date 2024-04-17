@@ -23,7 +23,7 @@ def parse_arguments():
     parser.add_argument('-p', '--page-count', type=int, default=SEARCH_PAGE_COUNT,
                         help='Number of pages to search for keyword')
     parser.add_argument('-g', '--generate-report', action='store_true', help='Generate report')
-    parser.add_argument('-r', '--report-type', choices=['category', 'tag', 'author'],
+    parser.add_argument('-r', '--report-type', choices=['all', 'category', 'tag', 'author'],
                         help='Type of report to generate')
     parser.add_argument('-m', '--report-method', choices=['all', 'database', 'current'],
                         help='Method for generating report')
@@ -97,40 +97,34 @@ if __name__ == "__main__":
             )
 
             if args.generate_report:
-                # After performing keyword search, generate reports if requested
-                if args.report_type == 'category':
-                    report_content, data = report_generator.count_post_per_category(
-                        method=args.report_method,
-                        keyword_used=args.keyword,
-                        parsed_items=parsed_items
-                    )
-                    report_generator.export_report(report_content, data, keyword, parsed_items, args.file_format)
-                elif args.report_type == 'tag':
-                    report_content, data = report_generator.count_post_per_tag(
-                        method=args.report_method,
-                        keyword_used=args.keyword,
-                        parsed_items=parsed_items
-                    )
-                    report_generator.export_report(
-                        report_content=report_content,
-                        keyword=keyword,
-                        parsed_items=parsed_items,
-                        file_format=args.file_format
-                    )
-                elif args.report_type == 'author':
-                    report_content, data = report_generator.count_post_per_author(
-                        method=args.report_method,
-                        keyword_used=args.keyword,
-                        parsed_items=parsed_items
-                    )
-                    report_generator.export_report(
-                        report_content=report_content,
-                        keyword=keyword,
-                        parsed_items=parsed_items,
-                        file_format=args.file_format
-                    )
+                if args.report_type == 'all':
+                    report_types = ['category', 'tag', 'author']
                 else:
-                    print("Error: Please specify a valid report type.")
+                    report_types = [args.report_type]
+
+                for report_type in report_types:
+                    if report_type == 'category':
+                        report_content, data = report_generator.count_post_per_category(
+                            method=args.report_method,
+                            keyword_used=args.keyword,
+                            parsed_items=parsed_items
+                        )
+                    elif report_type == 'tag':
+                        report_content, data = report_generator.count_post_per_tag(
+                            method=args.report_method,
+                            keyword_used=args.keyword,
+                            parsed_items=parsed_items
+                        )
+                    elif report_type == 'author':
+                        report_content, data = report_generator.count_post_per_author(
+                            method=args.report_method,
+                            keyword_used=args.keyword,
+                            parsed_items=parsed_items
+                        )
+                    else:
+                        print("Error: Please specify a valid report type.")
+
+                    report_generator.export_report(report_content, data, keyword, parsed_items, args.file_format)
 
             elif args.report_type == 'category':
                 if args.report_method == 'all' or args.report_method == 'database' or args.report_method is None:
@@ -254,3 +248,5 @@ if __name__ == "__main__":
         # Close database connection
         database_manager.close_connection()
         print('Database connection closed.')
+
+# TODO: enhance and optimize main.py
